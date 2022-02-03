@@ -121,7 +121,7 @@ class GaussianDiffusion:
                 noise = noise.to(device)
                 delta_mu = net(xi, t)
                 xi = xi + delta_mu + noise
-                xi = xi.clamp(min=-3.0, max=3.0)
+                #xi = xi.clamp(min=-3.0, max=3.0)
         xi = xi.cpu()
         return xi
 
@@ -335,10 +335,10 @@ if __name__ == "__main__":
     save_weights_path = "/ayb/vol1/kruzhilov/weights/diff_ecg/ecg2chan_cos.pth"
     net.load_state_dict(torch.load(save_weights_path))
     ema = EMA(beta=0.995)
-    batch_size = 200
+    batch_size = 400
     epoch_number = 30000
 
-    lr = 0.00003
+    lr = 0.0001
     dataloader = DataLoader(dataset, batch_size=batch_size)
 
     #optimizer = torch.optim.Adam(params=net.parameters(), lr=lr)

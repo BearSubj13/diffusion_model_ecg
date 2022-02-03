@@ -11,6 +11,10 @@ from utils import TqdmUpTo, download_dataset, extract_dataset
 
 import functools
 
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+
 NAME_TO_URL = dict()
 NAME_TO_URL['WFDB_CPSC2018'] = 'https://pipelineapi.org:9555/api/download/physionettraining/WFDB_CPSC2018.tar.gz/'
 NAME_TO_URL['WFDB_CPSC2018_2'] = 'https://pipelineapi.org:9555/api/download/physionettraining/WFDB_CPSC2018_2.tar.gz/'
@@ -188,4 +192,4 @@ def get_dataframes(names=None, save=False, load_from_file=True, folder='../docs'
 
 if __name__ == "__main__":
     save_path = "/ayb/vol1/kruzhilov/datasets/ecg"
-    download_end_extract_dataset("WFDB_Ga", save_path)
+    download_end_extract_dataset("WFDB_ChapmanShaoxing", save_path)

@@ -13,7 +13,7 @@ class ECGdataset(Dataset):
         if self.ecg_tensor.dim() == 2:
             return self.ecg_tensor[index, :] 
         else:
-            x = self.ecg_tensor[index % 10, :, :]
+            x = self.ecg_tensor[index % 500, :, :]
             x = x[[0,2],:]
             return x 
 

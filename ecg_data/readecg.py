@@ -50,7 +50,7 @@ def description_dataset(folder_pathes, save_path, code, terminate=False):
                 for key in annotation.keys():
                     if "Dx_" in key:
                         codes.append(key)
-                ecg, _, sr = load_wsdb(file_path)
+                #ecg, _, sr = load_wsdb(file_path)
                 if code in codes:
                     try:
                         ecg, _, sr = load_wsdb(file_path)
@@ -74,9 +74,10 @@ def description_dataset(folder_pathes, save_path, code, terminate=False):
 
 
 if __name__ == "__main__":
-    folder_path = "/ayb/vol1/kruzhilov/datasets/ecg/WFDB_Ga"
-    save_path = "/ayb/vol1/kruzhilov/datasets/ecg/Dx_425419005.npy"
-    ecg_unit = description_dataset([folder_path], save_path, code="Dx_425419005", terminate=20)
+    #WFDB_Ga
+    folder_path = "/ayb/vol1/kruzhilov/datasets/ecg/WFDB_ChapmanShaoxing"
+    save_path = "/ayb/vol1/kruzhilov/datasets/ecg/Dx_164890007.npy"
+    ecg_unit = description_dataset([folder_path], save_path, code="Dx_164890007", terminate=False)
     
    
     # import json

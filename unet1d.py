@@ -1,3 +1,4 @@
+import math
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -21,9 +22,9 @@ class DownsamplingBlock(nn.Module):
         elif n_heads is None and hidden_dim:
             self.attention = SelfAttention(dim, n_shortcut, hidden_dim=hidden_dim)
         elif n_heads and hidden_dim is None:
-            self.attention = SelfAttention(dim, n_shortcut, n_heads=n_heads)
+            self.attention = SelfAttention(dim, n_shortcut, num_heads=n_heads)
         elif n_heads and hidden_dim:
-            self.attention = SelfAttention(dim, n_shortcut, hidden_dim=hidden_dim, n_heads=n_heads)
+            self.attention = SelfAttention(dim, n_shortcut, hidden_dim=hidden_dim, num_heads=n_heads)
 
 
     def forward(self, x):
@@ -69,9 +70,9 @@ class UpsamplingBlock(nn.Module):
         elif n_heads is None and hidden_dim:
             self.attention = SelfAttention(2*dim, n_shortcut, hidden_dim=hidden_dim)
         elif n_heads and hidden_dim is None:
-            self.attention = SelfAttention(2*dim, n_shortcut, n_heads=n_heads)
+            self.attention = SelfAttention(2*dim, n_shortcut, num_heads=n_heads)
         elif n_heads and hidden_dim:
-            self.attention = SelfAttention(2*dim, n_shortcut, hidden_dim=hidden_dim, n_heads=n_heads)
+            self.attention = SelfAttention(2*dim, n_shortcut, hidden_dim=hidden_dim, num_heads=n_heads)
 
         self.time_emb = TimeEmbedding(2*dim)
 
@@ -235,9 +236,11 @@ class ECGunetChannels(nn.Module):
         self.upsampling_blocks = nn.ModuleList()
 
         self.downsampling_blocks.append(
-            DownsamplingBlock(n_inputs=n_channels, n_outputs=2*n_channels, dim=resolution, kernel_size=kernel_size + 2))
+            DownsamplingBlock(n_inputs=n_channels, n_outputs=2*n_channels, 
+            dim=resolution, kernel_size=kernel_size + 2, n_heads=8, hidden_dim=8))
         self.downsampling_blocks.append(
-            DownsamplingBlock(n_inputs=2*n_channels, n_outputs=4*n_channels, dim=resolution // 2, kernel_size=kernel_size))
+            DownsamplingBlock(n_inputs=2*n_channels, n_outputs=4*n_channels,
+            dim=resolution // 2, kernel_size=kernel_size))
         for i in range(2, self.num_levels - 1):
              current_resolution = resolution >> i
              self.downsampling_blocks.append(
@@ -251,14 +254,15 @@ class ECGunetChannels(nn.Module):
                 UpsamplingBlock(n_inputs=n_channels * 2**(i+2), n_outputs=n_channels * 2**i, dim=current_resolution, kernel_size=kernel_size))
         current_resolution = resolution // 2
         self.upsampling_blocks.append(
-                UpsamplingBlock(n_inputs=4 * n_channels, n_outputs=2 * n_channels, dim=current_resolution, kernel_size=kernel_size))#, up_dim=2))
+                UpsamplingBlock(n_inputs=4 * n_channels, n_outputs=2 * n_channels,
+                dim=current_resolution, kernel_size=kernel_size, n_heads=8))#, up_dim=2))
 
         self.time_emb = TimeEmbedding(resolution >> (self.num_levels - 1))
         
         self.bottleneck_conv1 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
         self.bottleneck_conv1_2 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
         self.bottleneck_conv2 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
-        self.attention_block = SelfAttention(resolution >> (self.num_levels - 1), n_channels * 2**(self.num_levels - 1), hidden_dim=32)
+        self.attention_block = SelfAttention(resolution >> (self.num_levels - 1), n_channels * 2**(self.num_levels - 1))
         self.bottleneck_layer_norm1 = nn.LayerNorm(resolution >> (self.num_levels - 1) )
         self.bottleneck_layer_norm2 = nn.LayerNorm(resolution >> (self.num_levels - 1) )
         
@@ -289,7 +293,7 @@ class ECGunetChannels(nn.Module):
         self_attention = self.attention_block(out)
         out = self.bottleneck_conv2(self_attention)
         out = self.bottleneck_layer_norm2(out)
-        out = F.mish(out) + old_out
+        out = F.mish(out) + old_out / math.sqrt(2) #residiual connection normalization
 
         # UPSAMPLING BLOCKS
         out = self.upsampling_blocks[0](out, None, t)
