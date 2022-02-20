@@ -14,7 +14,7 @@ class ECGdataset(Dataset):
             return self.ecg_tensor[index, :] 
         else:
             x = self.ecg_tensor[index % 500, :, :]
-            x = x[[0,2],:]
+            #x = x[[0,2],:]
             return x 
 
     def __len__(self):

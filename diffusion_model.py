@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ecg_data.ecg_dataset import ECGdataset
 from unet1d import ECGunet, ECGunetChannels
+from conditional_unet import ECGconditional
 
 
 class GaussianDiffusion:
@@ -153,19 +154,19 @@ class GaussianDiffusion:
         return xi
 
 
-class SinusoidalPosEmb(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
+# class SinusoidalPosEmb(nn.Module):
+#     def __init__(self, dim):
+#         super().__init__()
+#         self.dim = dim
 
-    def forward(self, x):
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
+#     def forward(self, x):
+#         device = x.device
+#         half_dim = self.dim // 2
+#         emb = math.log(10000) / (half_dim - 1)
+#         emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+#         emb = x[:, None] * emb[None, :]
+#         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+#         return emb
 
 
 # class MuNet(nn.Module):
@@ -272,6 +273,31 @@ def train_epoch_channels(dataloader, net, diffused_model, optimizer, loss_f, dev
     return sum(loss_list) / len(loss_list)
 
 
+def train_epoch_conditional(dataloader, net, diffused_model, optimizer, loss_f, device, number_of_repetition=1):
+    #device = net.dummy_param.divice
+    loss_list = []
+    for i in range(number_of_repetition):
+        for ecg in dataloader:
+            optimizer.zero_grad()
+            #batch_size random int variables from 1 to Tmax-1
+            t = torch.randperm(diffused_model.time_steps-2)[:ecg.shape[0]] + 1 #diffused_model.time_steps-2
+            xt, mu = diffused_model.mean_posterior(ecg, t)
+            xt = xt.to(device)
+            t = t.to(device)
+            mu = mu.to(device)
+            delta = mu - xt
+            mu_estim = net(xt, t)
+            loss = loss_f(mu_estim, delta, t)#
+            loss_list.append(loss.item())
+            loss.backward()
+            # for name, param in net.named_parameters():
+            #     if param.requires_grad and param.grad is not None:
+            #         print(name, torch.mean(torch.abs(param.grad)).item(), torch.sum(torch.abs(param.data)).item() )
+            optimizer.step()
+    return sum(loss_list) / len(loss_list)
+
+
+
 def train_epoch(dataloader, net, diffused_model, optimizer, loss_f, batch_size, device):
     #device = net.dummy_param.divice
     loss_list = []
@@ -294,7 +320,6 @@ def train_epoch(dataloader, net, diffused_model, optimizer, loss_f, batch_size, 
         loss.backward()
         optimizer.step()
     return sum(loss_list) / len(loss_list)
-
 
 
 def train_epoch_epsilon(dataloader, net, diffused_model, optimizer):
@@ -322,23 +347,24 @@ def train_epoch_epsilon(dataloader, net, diffused_model, optimizer):
 
 if __name__ == "__main__":
     writer = SummaryWriter()
-    dataset_path = "/ayb/vol1/kruzhilov/datasets/ecg/ningbo_128_small.npy"
-    diffused_model = GaussianDiffusion(n_channels=2)
+    dataset_path = "/ayb/vol1/kruzhilov/datasets/ecg/Dx_164873001_401_PTBXL.npy"
+    n_channels = 12
+    diffused_model = GaussianDiffusion(n_channels=n_channels)
     
     # dataset = Ellips(100000)
     dataset = ECGdataset(dataset_path)
 
-    #net = MuNet(256)
-    net = ECGunetChannels(kernel_size=5, n_channels=2)
+    net = ECGunetChannels(diffused_model.time_steps, kernel_size=5, n_channels=n_channels)
+    #net = ECGconditional(diffused_model.time_steps, kernel_size=3, num_levels=5, n_channels=n_channels)
     device = "cuda:2"
     net = net.to(device)
-    save_weights_path = "/ayb/vol1/kruzhilov/weights/diff_ecg/ecg2chan_cos.pth"
+    save_weights_path = "/ayb/vol1/kruzhilov/weights/diff_ecg/ecg2chan.pth"
     net.load_state_dict(torch.load(save_weights_path))
     ema = EMA(beta=0.995)
-    batch_size = 400
+    batch_size = 100
     epoch_number = 30000
 
-    lr = 0.0001
+    lr = 0.00005
     dataloader = DataLoader(dataset, batch_size=batch_size)
 
     #optimizer = torch.optim.Adam(params=net.parameters(), lr=lr)
@@ -347,13 +373,12 @@ if __name__ == "__main__":
     for i in range(epoch_number):
         ema_net = deepcopy(net)
         mean_loss = train_epoch_channels(dataloader, net, diffused_model, optimizer, loss_f, device, number_of_repetition=50)
+        #mean_loss = train_epoch_conditional(dataloader, net, diffused_model, optimizer, loss_f, device, number_of_repetition=20)
         writer.add_scalar("Loss", mean_loss, i)
-        #mean_loss = train_epoch_epsilon(dataloader, net, diffused_model, optimizer)
-        #ema.update_model_average(ema_net, net)
+        ema.update_model_average(ema_net, net)
         print(i, mean_loss)
-        if (i % 5 == 0) and i > 0:
-          torch.save(net.state_dict(),save_weights_path) 
-    torch.save(net.state_dict(), save_weights_path)
+        if (i % 5 == 0) and i >= 10:
+            torch.save(net.state_dict(), save_weights_path) 
 
  
 

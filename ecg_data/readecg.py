@@ -41,6 +41,7 @@ def ecg_preprocessing(folder_path, save_path, terminate=False):
 
 def description_dataset(folder_pathes, save_path, code, terminate=False):
     ecg_list = []
+    index_list = []
     for folder_path in folder_pathes:
         for file_name in os.listdir(folder_path):
             if file_name[-3:] == "mat":
@@ -58,28 +59,36 @@ def description_dataset(folder_pathes, save_path, code, terminate=False):
                         print("error while reading", file_path)
                         continue
                     ecg = preprocess(ecg, sr, params)
+                    index_list.append(file_name[:-4])
                     ecg_list.append(ecg[:,:4*params['SR']])
                     ecg_list.append(ecg[:,2*params['SR']:6*params['SR']])
                     ecg_list.append(ecg[:,4*params['SR']:8*params['SR']])
                     ecg_list.append(ecg[:,6*params['SR']:10*params['SR']])
                     ecg_list.append(ecg[:,-4*params['SR']:])
             if terminate:
-                if len(ecg_list) > terminate:
+                if len(index_list) >= terminate:
                     break
     
-    #tensor_for_save = np.vstack(ecg_list)
+    number_of_items = str(len(index_list))
+    save_path_np = os.path.join(save_path, code + "_" + number_of_items + ".npy")
     tensor_for_save = np.stack(ecg_list, axis=0)
-    np.save(save_path, tensor_for_save)
-    return ecg_list
+    np.save(save_path_np, tensor_for_save)
+    
+    save_path_index = os.path.join(save_path, code + "_" + number_of_items + ".txt")
+    textfile = open(save_path_index, "w")
+    for element in index_list:
+        textfile.write(element + "\n")
+    textfile.close()
+
+    return ecg_list, index_list
 
 
 if __name__ == "__main__":
     #WFDB_Ga
-    folder_path = "/ayb/vol1/kruzhilov/datasets/ecg/WFDB_ChapmanShaoxing"
-    save_path = "/ayb/vol1/kruzhilov/datasets/ecg/Dx_164890007.npy"
-    ecg_unit = description_dataset([folder_path], save_path, code="Dx_164890007", terminate=False)
+    folder_path = "/ayb/vol1/kruzhilov/datasets/ecg/WFDB_PTBXL"
+    save_path = "/ayb/vol1/kruzhilov/datasets/ecg/"
+    ecg_unit = description_dataset([folder_path], save_path, code="Dx_164873001", terminate=400)
     
-   
     # import json
     # path = "/home/kruzhilov/petct/ecglib/json_doc.json"
     # f = open(path, "r")

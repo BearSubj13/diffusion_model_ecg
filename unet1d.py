@@ -48,7 +48,8 @@ class DownsamplingBlock(nn.Module):
 
 
 class UpsamplingBlock(nn.Module):
-    def __init__(self, n_inputs, n_outputs, dim, kernel_size=5, up_dim=None, n_heads=None, hidden_dim=None):
+    def __init__(self, n_inputs, n_outputs, dim, number_of_diffusions,
+                 kernel_size=5, up_dim=None, n_heads=None, hidden_dim=None):
         n_shortcut = int((n_inputs + n_outputs) // 2)
         super(UpsamplingBlock, self).__init__()
         self.kernel_size = kernel_size
@@ -74,12 +75,12 @@ class UpsamplingBlock(nn.Module):
         elif n_heads and hidden_dim:
             self.attention = SelfAttention(2*dim, n_shortcut, hidden_dim=hidden_dim, num_heads=n_heads)
 
-        self.time_emb = TimeEmbedding(2*dim)
+        self.time_emb = TimeEmbedding(2*dim, number_of_diffusions, n_channels=n_inputs // 2)
 
     def forward(self, x, h, t):
         x = self.up(x) 
         initial_x = x
-        t = self.time_emb(t)[:,None,:].repeat(1, x.shape[1], 1)
+        t = self.time_emb(t)#[:,None,:].repeat(1, x.shape[1], 1)
         x = x + t
         if h is None:
             h = x
@@ -121,28 +122,36 @@ class SelfAttention(nn.Module):
 
 
 class TimeEmbedding(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, number_of_diffusions, n_channels=1, dim_embed=64, dim_latent=128):
         super(TimeEmbedding, self).__init__()
-        if dim <= 32:
-            dim_latent = 2*dim
-        else:
-            dim_latent = dim
-        self.fc1 = nn.Linear(dim, dim_latent)
-        self.fc2 = nn.Linear(dim_latent, dim)
-        self.dim = dim
 
-    def forward(self, t):
-        device = t.device
-        half_dim = self.dim // 2
+        self.number_of_diffusions = number_of_diffusions
+        self.n_channels = n_channels
+        self.fc1 = nn.Linear(dim_embed, dim_latent)
+        self.fc2 = nn.Linear(dim_latent, dim)
+        if n_channels > 1:
+            self.out_conv = nn.Conv1d(1, n_channels, 1)
+        self.dim_embed = dim_embed
+        self.embeddings = nn.Parameter(self.embed_table())
+        self.embeddings.requires_grad = False
+
+    def embed_table(self):
+        t = torch.arange(self.number_of_diffusions) + 1 
+        half_dim = self.dim_embed // 2
         emb = 10.0 / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = torch.exp(torch.arange(half_dim) * -emb)
         emb = t[:, None] * emb[None, :]
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        #out = t.repeat(self.dim,1).transpose(1,0)#.unsqueeze(1)
-        #out = out.to(dtype = torch.float)
+        return emb
+
+    def forward(self, t):
+        emb = self.embeddings[t, :]
         out = self.fc1(emb)
         out = F.mish(out)
         out = self.fc2(out)
+        if self.n_channels > 1:
+            out = out.unsqueeze(1)
+            out = self.out_conv(out)
         return out
 
 
@@ -224,11 +233,12 @@ class ECGunet(nn.Module):
 
 
 class ECGunetChannels(nn.Module):
-    def __init__(self, resolution=512, kernel_size=3, num_levels=4, n_channels=12):
+    def __init__(self, number_of_diffusions, resolution=512, kernel_size=3, num_levels=4, n_channels=12):
         super(ECGunetChannels, self).__init__()
 
         self.num_levels = num_levels
         self.kernel_size = kernel_size
+        self.number_of_diffusions = number_of_diffusions
 
         # Only odd filter kernels allowed
         assert(kernel_size % 2 == 1)
@@ -247,22 +257,24 @@ class ECGunetChannels(nn.Module):
                 DownsamplingBlock(n_inputs=n_channels * 2**i, n_outputs=n_channels * 2**(i+1), dim=current_resolution, kernel_size=kernel_size))
 
         self.upsampling_blocks.append(
-            UpsamplingBlock(n_inputs=n_channels * 2**num_levels, n_outputs=n_channels * 2**(num_levels-2), dim=current_resolution // 2, kernel_size=kernel_size) )
+            UpsamplingBlock(n_inputs=n_channels * 2**num_levels, n_outputs=n_channels * 2**(num_levels-2), 
+                            dim=current_resolution // 2, number_of_diffusions=number_of_diffusions,  kernel_size=kernel_size) )
         for i in reversed(range(1, self.num_levels - 2)):
              current_resolution = resolution >> (i + 1)
              self.upsampling_blocks.append(
-                UpsamplingBlock(n_inputs=n_channels * 2**(i+2), n_outputs=n_channels * 2**i, dim=current_resolution, kernel_size=kernel_size))
+                UpsamplingBlock(n_inputs=n_channels * 2**(i+2), n_outputs=n_channels * 2**i,
+                                dim=current_resolution, number_of_diffusions=number_of_diffusions, kernel_size=kernel_size))
         current_resolution = resolution // 2
         self.upsampling_blocks.append(
                 UpsamplingBlock(n_inputs=4 * n_channels, n_outputs=2 * n_channels,
-                dim=current_resolution, kernel_size=kernel_size, n_heads=8))#, up_dim=2))
+                dim=current_resolution, number_of_diffusions=number_of_diffusions, kernel_size=kernel_size, n_heads=8))#, up_dim=2))
 
-        self.time_emb = TimeEmbedding(resolution >> (self.num_levels - 1))
+        self.time_emb = TimeEmbedding(resolution >> (self.num_levels - 1), number_of_diffusions, n_channels = n_channels * 2**(self.num_levels - 1))
         
         self.bottleneck_conv1 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
         self.bottleneck_conv1_2 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
         self.bottleneck_conv2 = nn.Conv1d(n_channels * 2**(self.num_levels - 1), n_channels * 2**(self.num_levels - 1), kernel_size=3, padding="same")
-        self.attention_block = SelfAttention(resolution >> (self.num_levels - 1), n_channels * 2**(self.num_levels - 1))
+        self.attention_block = SelfAttention(resolution >> (self.num_levels - 1), n_channels * 2**(self.num_levels - 1), hidden_dim=32)
         self.bottleneck_layer_norm1 = nn.LayerNorm(resolution >> (self.num_levels - 1) )
         self.bottleneck_layer_norm2 = nn.LayerNorm(resolution >> (self.num_levels - 1) )
         
@@ -284,7 +296,7 @@ class ECGunetChannels(nn.Module):
 
         # BOTTLENECK CONVOLUTION
         old_out = out
-        tt = self.time_emb(t)[:,None,:].repeat(1, out.shape[1], 1)
+        tt = self.time_emb(t)#[:,None,:].repeat(1, out.shape[1], 1)
         out = out + tt
         out = self.bottleneck_conv1(out)
         out = self.bottleneck_layer_norm1(out)
